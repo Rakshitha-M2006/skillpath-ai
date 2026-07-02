@@ -12,6 +12,11 @@ const PORT = process.env.PORT || 5000;
 app.use(cors()); // Allows our frontend to talk to this server safely
 app.use(express.json()); // Allows our server to parse JSON data sent in request bodies
 
+// Root Route
+app.get('/', (req, res) => {
+  res.send('Welcome to the SkillPath AI Backend Server Base URL!');
+});
+
 // Simple Test Route
 app.get('/api/test', (req, res) => {
   res.json({ message: "SkillPath AI Backend API is alive and kicking!" });
