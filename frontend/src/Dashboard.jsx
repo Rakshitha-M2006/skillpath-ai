@@ -1,27 +1,24 @@
-function Dashboard({ user, onLogout }) {
+import { useEffect, useState } from 'react';
+import { auth } from '../services/firebase';
+import ResumeUpload from '../components/ResumeUpload';
+
+export default function Dashboard() {
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    // Listen for the logged-in user
+    const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #ccc', paddingBottom: '15px' }}>
-        <h2>SkillPath AI</h2>
-        <div>
-          <span style={{ marginRight: '15px', color: '#555' }}>{user.email}</span>
-          <button onClick={onLogout} style={{ padding: '8px 15px', background: '#d9534f', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-            Log Out
-          </button>
-        </div>
-      </header>
+    <div className="p-8">
+      <h1 className="text-2xl font-bold mb-4">Welcome to your Dashboard</h1>
       
-      <main style={{ marginTop: '30px' }}>
-        <h3>Your Learning Roadmap</h3>
-        <p style={{ color: '#666' }}>This is where your AI-generated roadmap and skill gaps will appear.</p>
-        
-        {/* Placeholder for future Phase 7 components */}
-        <div style={{ marginTop: '20px', padding: '20px', border: '1px dashed #aaa', borderRadius: '8px', textAlign: 'center' }}>
-          <p>Resume upload and skill extraction module coming soon...</p>
-        </div>
-      </main>
+      {/* Pass the user object as a prop here! */}
+      {user && <ResumeUpload user={user} />}
     </div>
   );
 }
-
-export default Dashboard;
