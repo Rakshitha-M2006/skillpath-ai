@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { auth, db } from './firebase';
-import { doc, setDoc } from 'firebase/firestore'; // Changed updateDoc to setDoc for safety
+import { doc, setDoc } from 'firebase/firestore';
+import { extractTextFromPDF } from './pdfParser';
+import { detectSkillsFromText } from './skillDetector';
 
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
 const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
@@ -10,6 +12,7 @@ function ResumeUpload() {
   const [uploading, setUploading] = useState(false);
   const [uploadedUrl, setUploadedUrl] = useState(null);
   const [error, setError] = useState('');
+  const [skills, setSkills] = useState([]); // New state to hold matched skills for the UI
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -17,6 +20,7 @@ function ResumeUpload() {
       setFile(selectedFile);
       setError('');
       setUploadedUrl(null);
+      setSkills([]);
     } else {
       setError('Please upload a valid PDF file.');
       e.target.value = null;
@@ -42,7 +46,6 @@ function ResumeUpload() {
       formData.append('upload_preset', UPLOAD_PRESET);
       formData.append('public_id', `${auth.currentUser.uid}_resume`);
 
-      // FIXED: Added '/image/upload' which is required by Cloudinary for unsigned API hits
       const response = await fetch(
         `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
         { method: 'POST', body: formData }
@@ -56,9 +59,18 @@ function ResumeUpload() {
       const data = await response.json();
       const url = data.secure_url;
 
-      // FIXED: Using setDoc with merge: true so it doesn't fail if the user document hasn't been created yet
+      console.log("Starting text extraction...");
+      const extractedText = await extractTextFromPDF(file);
+      
+      console.log("Detecting skills...");
+      const matchedSkills = detectSkillsFromText(extractedText);
+      
+      // Save to local component state so React renders them immediately
+      setSkills(matchedSkills);
+
       await setDoc(doc(db, 'users', auth.currentUser.uid), { 
         resumeUrl: url,
+        skills: matchedSkills, 
         updatedAt: new Date().toISOString()
       }, { merge: true });
 
@@ -91,15 +103,44 @@ function ResumeUpload() {
           disabled={uploading}
           style={{ padding: '8px 20px', background: '#0056b3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
         >
-          {uploading ? 'Uploading...' : `Upload ${file.name}`}
+          {uploading ? 'Uploading & Parsing...' : `Upload ${file.name}`}
         </button>
       )}
 
       {error && <p style={{ color: '#cc0000', marginTop: '10px' }}>{error}</p>}
 
       {uploadedUrl && (
-        <div style={{ marginTop: '15px', padding: '10px', backgroundColor: '#e6ffe6', borderRadius: '4px', display: 'inline-block' }}>
-          <span style={{ color: '#006600', fontWeight: 'bold' }}>✓ Uploaded successfully</span>
+        <div style={{ marginTop: '15px' }}>
+          <div style={{ padding: '10px', backgroundColor: '#e6ffe6', borderRadius: '4px', display: 'inline-block', marginBottom: '15px' }}>
+            <span style={{ color: '#006600', fontWeight: 'bold' }}>✓ Uploaded and parsed successfully</span>
+          </div>
+
+          {/* Visual Skills Tag Display */}
+          {skills.length > 0 ? (
+            <div>
+              <h4 style={{ marginBottom: '10px', color: '#333' }}>Extracted Skills:</h4>
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px' }}>
+                {skills.map((skill, index) => (
+                  <span
+                    key={index}
+                    style={{
+                      padding: '6px 12px',
+                      backgroundColor: '#e0f2fe',
+                      color: '#0369a1',
+                      borderRadius: '16px',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      border: '1px solid #bae6fd'
+                    }}
+                  >
+                    {skill}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p style={{ color: '#666', fontSize: '13px' }}>No matching skills detected from the taxonomy mapping.</p>
+          )}
         </div>
       )}
     </div>
