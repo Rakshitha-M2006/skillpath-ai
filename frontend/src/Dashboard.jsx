@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { auth } from '../services/firebase';
-import ResumeUpload from '../components/ResumeUpload';
+import { auth } from "./firebase";
+import ResumeUpload from "./ResumeUpload";
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);

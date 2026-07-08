@@ -1,95 +1,109 @@
 import { useState } from 'react';
-import { storage, db } from '../services/firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { doc, setDoc } from 'firebase/firestore';
-import * as pdfjsLib from 'pdfjs-dist';
+import { auth, db } from './firebase';
+import { doc, setDoc } from 'firebase/firestore'; // Changed updateDoc to setDoc for safety
 
-// This tells pdf.js where to find its worker file to process PDFs in the browser
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
-export default function ResumeUpload({ user }) {
+function ResumeUpload() {
   const [file, setFile] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadedUrl, setUploadedUrl] = useState(null);
+  const [error, setError] = useState('');
 
   const handleFileChange = (e) => {
-    if (e.target.files[0]) {
-      setFile(e.target.files[0]);
+    const selectedFile = e.target.files[0];
+    if (selectedFile && selectedFile.type === 'application/pdf') {
+      setFile(selectedFile);
+      setError('');
+      setUploadedUrl(null);
+    } else {
+      setError('Please upload a valid PDF file.');
+      e.target.value = null;
     }
-  };
-
-  // Helper function to extract text from the PDF
-  const extractText = async (pdfFile) => {
-    const arrayBuffer = await pdfFile.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    let fullText = "";
-    
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items.map(item => item.str).join(" ");
-      fullText += pageText + " ";
-    }
-    return fullText;
   };
 
   const handleUpload = async () => {
-    if (!file) return setStatus("Please select a PDF first.");
-    if (!user) return setStatus("Error: You must be logged in.");
+    if (!file) {
+      setError('No file selected.');
+      return;
+    }
+    if (!auth.currentUser) {
+      setError('User not authenticated. Please log in again.');
+      return;
+    }
 
-    setLoading(true);
-    
+    setUploading(true);
+    setError('');
+
     try {
-      // 1. Read the PDF text
-      setStatus("Extracting text from PDF...");
-      const extractedText = await extractText(file);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('upload_preset', UPLOAD_PRESET);
+      formData.append('public_id', `${auth.currentUser.uid}_resume`);
 
-      // 2. Upload the file to Firebase Storage
-      setStatus("Uploading file...");
-      const fileRef = ref(storage, `resumes/${user.uid}/${file.name}`);
-      await uploadBytes(fileRef, file);
-      const downloadURL = await getDownloadURL(fileRef);
+      // FIXED: Added '/image/upload' which is required by Cloudinary for unsigned API hits
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+        { method: 'POST', body: formData }
+      );
 
-      // 3. Save the text and URL to Firestore
-      setStatus("Saving to database...");
-      const userDocRef = doc(db, 'users', user.uid);
-      
-      // { merge: true } ensures we update existing data without deleting their role/email
-      await setDoc(userDocRef, {
-        resumeUrl: downloadURL,
-        resumeText: extractedText,
-        updatedAt: new Date()
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error?.message || 'Upload failed to Cloudinary.');
+      }
+
+      const data = await response.json();
+      const url = data.secure_url;
+
+      // FIXED: Using setDoc with merge: true so it doesn't fail if the user document hasn't been created yet
+      await setDoc(doc(db, 'users', auth.currentUser.uid), { 
+        resumeUrl: url,
+        updatedAt: new Date().toISOString()
       }, { merge: true });
 
-      setStatus("Success! Resume processed and saved.");
-      setFile(null); // Clear the input
-
-    } catch (error) {
-      console.error(error);
-      setStatus("Error: " + error.message);
+      setUploadedUrl(url);
+    } catch (err) {
+      console.error("Upload error sequence:", err);
+      setError(err.message || 'Upload failed. Please try again.');
     } finally {
-      setLoading(false);
+      setUploading(false);
     }
   };
 
   return (
-    <div className="border p-6 rounded-lg shadow-sm mt-4 bg-white">
-      <h2 className="text-xl font-semibold mb-4">Upload Your Resume</h2>
-      <input 
-        type="file" 
-        accept="application/pdf" 
+    <div style={{ marginTop: '20px', padding: '20px', border: '2px dashed #ccc', borderRadius: '8px', textAlign: 'center', backgroundColor: '#f9f9f9' }}>
+      <h3 style={{ marginBottom: '10px' }}>Upload Your Resume</h3>
+      <p style={{ color: '#666', marginBottom: '20px', fontSize: '14px' }}>
+        We will securely extract your current skills to generate your roadmap. (PDF only)
+      </p>
+
+      <input
+        type="file"
+        accept="application/pdf"
         onChange={handleFileChange}
-        className="mb-4 block"
+        style={{ display: 'block', margin: '0 auto 15px auto' }}
       />
-      <button 
-        onClick={handleUpload}
-        disabled={loading || !file}
-        className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50"
-      >
-        {loading ? "Processing..." : "Upload & Process"}
-      </button>
-      
-      {status && <p className="mt-4 text-sm font-medium text-gray-700">{status}</p>}
+
+      {file && !uploadedUrl && (
+        <button
+          onClick={handleUpload}
+          disabled={uploading}
+          style={{ padding: '8px 20px', background: '#0056b3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+        >
+          {uploading ? 'Uploading...' : `Upload ${file.name}`}
+        </button>
+      )}
+
+      {error && <p style={{ color: '#cc0000', marginTop: '10px' }}>{error}</p>}
+
+      {uploadedUrl && (
+        <div style={{ marginTop: '15px', padding: '10px', backgroundColor: '#e6ffe6', borderRadius: '4px', display: 'inline-block' }}>
+          <span style={{ color: '#006600', fontWeight: 'bold' }}>✓ Uploaded successfully</span>
+        </div>
+      )}
     </div>
   );
 }
+
+export default ResumeUpload;
